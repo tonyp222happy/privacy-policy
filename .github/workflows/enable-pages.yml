@@ -1,0 +1,58 @@
+name: Enable GitHub Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/enable-pages.yml
+
+permissions:
+  contents: read
+  pages: write
+
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable Pages from the main branch root
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          auth=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+          create_code=$(curl -sS -o /tmp/pages-create.json -w "%{http_code}" \
+            -X POST "${auth[@]}" \
+            "https://api.github.com/repos/${repo}/pages" \
+            -d '{"build_type":"legacy","source":{"branch":"main","path":"/"}}')
+          echo "create_status=${create_code}"
+          python3 - << 'PY'
+          import json
+          data = json.load(open("/tmp/pages-create.json"))
+          keep = {k: data.get(k) for k in ("message", "status", "html_url", "https_enforced", "build_type", "public", "documentation_url")}
+          source = data.get("source")
+          if isinstance(source, dict):
+              keep["source"] = {k: source.get(k) for k in ("branch", "path")}
+          errors = data.get("errors")
+          if errors:
+              keep["errors"] = errors
+          print(json.dumps(keep))
+          PY
+          if [ "${create_code}" != "201" ] && [ "${create_code}" != "409" ]; then
+            exit 1
+          fi
+          update_code=$(curl -sS -o /tmp/pages-update.json -w "%{http_code}" \
+            -X PUT "${auth[@]}" \
+            "https://api.github.com/repos/${repo}/pages" \
+            -d '{"https_enforced":true,"build_type":"legacy","source":{"branch":"main","path":"/"}}')
+          echo "update_status=${update_code}"
+          python3 - << 'PY'
+          import json
+          data = json.load(open("/tmp/pages-update.json"))
+          keep = {k: data.get(k) for k in ("message", "status", "html_url", "https_enforced", "build_type", "public", "documentation_url")}
+          source = data.get("source")
+          if isinstance(source, dict):
+              keep["source"] = {k: source.get(k) for k in ("branch", "path")}
+          print(json.dumps(keep))
+          PY
